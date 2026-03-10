@@ -5,3 +5,4 @@ dist/
 coverage/
 data/*.json
 *.log
+.worktrees/
