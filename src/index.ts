@@ -1,6 +1,7 @@
 import { CodexCliAdapter } from "./adapters/codex-cli-adapter.js";
 import { DiscordBot } from "./bot/bot.js";
 import { DiscordMessageHandler } from "./bot/message-handler.js";
+import { SandboxCommandHandler } from "./bot/sandbox-command-handler.js";
 import { loadConfig } from "./config/env.js";
 import { ChannelTaskQueue } from "./core/channel-task-queue.js";
 import { TaskOrchestrator } from "./core/task-orchestrator.js";
@@ -12,13 +13,15 @@ async function main(): Promise<void> {
   const config = loadConfig();
   const logger = createLogger(config.logLevel);
 
-  const bindingStore = FileBindingStore.fromFile(config.storage.bindingsFile);
+  const bindingStore = FileBindingStore.fromFile(
+    config.storage.bindingsFile,
+    config.codex.sandboxMode
+  );
   const sessionStore = FileSessionStore.fromFile(config.storage.sessionsFile);
   const queue = new ChannelTaskQueue();
   const codexAdapter = new CodexCliAdapter({
     binaryPath: config.codex.binaryPath,
     timeoutMs: config.codex.timeoutMs,
-    sandboxMode: config.codex.sandboxMode,
     logger
   });
 
@@ -40,10 +43,15 @@ async function main(): Promise<void> {
     },
     logger
   });
+  const sandboxCommandHandler = new SandboxCommandHandler({
+    bindingStore,
+    logger
+  });
 
   const bot = new DiscordBot({
     token: config.discord.token,
     handler,
+    sandboxCommandHandler,
     logger
   });
 

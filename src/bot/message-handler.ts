@@ -87,7 +87,10 @@ export class DiscordMessageHandler {
       const binding = await this.deps.bindingStore.getByChannelId(message.channelId);
       await message.reply(
         binding
-          ? `当前绑定项目：\`${binding.projectPath}\``
+          ? [
+              `当前绑定项目：\`${binding.projectPath}\``,
+              `当前沙箱模式：\`${binding.sandboxMode}\` (${binding.sandboxModeSource === "channel" ? "频道自定义" : "全局默认"})`
+            ].join("\n")
           : "当前频道还没有绑定项目。"
       );
       return true;

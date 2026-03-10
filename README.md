@@ -5,7 +5,7 @@
 ## MVP features
 
 - One project binding per Discord channel
-- Per-channel session metadata
+- Per-channel Codex session continuity
 - Per-channel serial task execution
 - Local JSON persistence for bindings and sessions
 - Replaceable Codex adapter interface
@@ -76,14 +76,25 @@ This MVP assumes a trusted Discord server. Any user with access to the bot can b
   Removes the current channel binding.
 - `!codex-help`
   Prints command help.
+- `/sandbox show`
+  Shows the effective sandbox mode for the current channel.
+- `/sandbox set mode:<read-only|workspace-write|danger-full-access>`
+  Sets a channel-specific sandbox mode override.
+- `/sandbox reset`
+  Resets the channel back to the global default sandbox mode.
 
 Any non-command message posted in a bound channel is treated as a Codex task.
+
+`danger-full-access` is high risk. In that mode, later tasks in the
+channel can write `.git`, create commits, and run more dangerous local
+commands.
 
 ## Data files
 
 The bot stores state under `DATA_DIR`:
 
 - `bindings.json` stores channel-to-project mappings
+- channel bindings also store optional per-channel sandbox overrides
 - `sessions.json` stores per-channel session metadata
 
 Queued tasks are in-memory only for the MVP. Restarting the process drops any tasks that have not completed.
@@ -113,7 +124,14 @@ npm run build
 The default adapter runs:
 
 ```bash
-codex exec -C <projectPath> --skip-git-repo-check -a never -s workspace-write
+codex exec --json -C <projectPath> --skip-git-repo-check -s workspace-write
 ```
 
-Channel session continuity is implemented in the MVP by injecting a compact channel summary into the next prompt. The `ChannelSession` model also reserves a `lastCodexSessionId` field for future native `resume` support.
+Channel session continuity now prefers native Codex session reuse. The
+bridge stores the latest Codex `thread_id` per Discord channel and uses
+`codex exec resume` on later tasks. If resume fails, it automatically
+falls back to a fresh `codex exec --json` run and updates the stored
+session id. The resume path also re-applies the configured sandbox mode
+through CLI config override so resumed tasks stay aligned with the
+project's write policy. A compact `historySummary` is still kept for
+diagnostics and fallback context.

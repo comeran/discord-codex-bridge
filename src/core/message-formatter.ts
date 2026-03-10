@@ -39,6 +39,9 @@ export function formatHelpMessage(
     `${bindCommand} /absolute/path/to/project`,
     `${bindingCommand}`,
     `${unbindCommand}`,
+    "/sandbox show",
+    "/sandbox set mode:<read-only|workspace-write|danger-full-access>",
+    "/sandbox reset",
     "频道中的普通消息会作为 Codex 任务执行。"
   ].join("\n");
 }

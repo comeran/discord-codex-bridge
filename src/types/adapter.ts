@@ -1,9 +1,11 @@
+import type { CodexSandboxMode } from "./config.js";
 import type { ChannelSession } from "./domain.js";
 
 export interface CodexExecuteInput {
   taskId: string;
   projectPath: string;
   prompt: string;
+  sandboxMode: CodexSandboxMode;
   session?: ChannelSession | null;
 }
 

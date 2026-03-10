@@ -73,6 +73,7 @@ export class TaskOrchestrator {
         taskId: task.taskId,
         projectPath: binding.projectPath,
         prompt: task.prompt,
+        sandboxMode: binding.sandboxMode,
         session
       });
 

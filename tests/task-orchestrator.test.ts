@@ -34,7 +34,8 @@ describe("TaskOrchestrator", () => {
         content: "Implemented the requested change.",
         stderr: "",
         exitCode: 0,
-        durationMs: 120
+        durationMs: 120,
+        sessionId: "session-1"
       }))
     };
 
@@ -49,6 +50,8 @@ describe("TaskOrchestrator", () => {
       guildId: "guild-1",
       channelId: "channel-1",
       projectPath: "/tmp/project-a",
+      sandboxMode: "workspace-write",
+      sandboxModeSource: "default",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -66,6 +69,7 @@ describe("TaskOrchestrator", () => {
 
     expect(result.status).toBe("completed");
     expect(session?.lastTaskId).toBe(submission.taskId);
+    expect(session?.lastCodexSessionId).toBe("session-1");
     expect(session?.historySummary).toContain("Last request:");
     expect(session?.historySummary).toContain("Last result:");
   });
@@ -97,6 +101,8 @@ describe("TaskOrchestrator", () => {
       guildId: "guild-1",
       channelId: "channel-2",
       projectPath: "/tmp/project-b",
+      sandboxMode: "workspace-write",
+      sandboxModeSource: "default",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -114,5 +120,117 @@ describe("TaskOrchestrator", () => {
     expect(result.status).toBe("failed");
     expect(result.error).toBe("Codex exited with code 1.");
     expect(result.stderr).toBe("command failed");
+  });
+
+  it("passes the saved channel session back into later adapter calls", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "orchestrator-test-"));
+    tempDirs.push(tempDir);
+
+    const sessionStore = FileSessionStore.fromFile(path.join(tempDir, "sessions.json"));
+    await sessionStore.upsert({
+      channelId: "channel-3",
+      historySummary: "Last request: add tests\nLast result: done",
+      lastCodexSessionId: "session-existing",
+      lastTaskId: "task-existing"
+    });
+
+    const seenSessions: Array<string | null | undefined> = [];
+    const seenSummaries: string[] = [];
+    const adapter: CodexAdapter = {
+      execute: vi.fn(async (input) => {
+        seenSessions.push(input.session?.lastCodexSessionId);
+        seenSummaries.push(input.session?.historySummary ?? "");
+
+        return {
+          ok: true,
+          content: "Continued the existing session.",
+          stderr: "",
+          exitCode: 0,
+          durationMs: 80,
+          sessionId: "session-existing"
+        };
+      })
+    };
+
+    const orchestrator = new TaskOrchestrator({
+      codexAdapter: adapter,
+      sessionStore,
+      queue: new ChannelTaskQueue(),
+      logger: pino({ level: "silent" })
+    });
+
+    const binding: ChannelBinding = {
+      guildId: "guild-1",
+      channelId: "channel-3",
+      projectPath: "/tmp/project-c",
+      sandboxMode: "workspace-write",
+      sandboxModeSource: "default",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const submission = orchestrator.submit({
+      guildId: "guild-1",
+      channelId: "channel-3",
+      userId: "user-3",
+      prompt: "Keep going.",
+      binding
+    });
+
+    await submission.completion;
+
+    expect(seenSessions).toEqual(["session-existing"]);
+    expect(seenSummaries[0]).toContain("Last request:");
+  });
+
+  it("passes the binding sandbox mode into the adapter", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "orchestrator-test-"));
+    tempDirs.push(tempDir);
+
+    const sessionStore = FileSessionStore.fromFile(path.join(tempDir, "sessions.json"));
+    const seenSandboxModes: string[] = [];
+    const adapter: CodexAdapter = {
+      execute: vi.fn(async (input) => {
+        seenSandboxModes.push(input.sandboxMode);
+
+        return {
+          ok: true,
+          content: "Executed with a channel-specific sandbox.",
+          stderr: "",
+          exitCode: 0,
+          durationMs: 50,
+          sessionId: "session-sandbox"
+        };
+      })
+    };
+
+    const orchestrator = new TaskOrchestrator({
+      codexAdapter: adapter,
+      sessionStore,
+      queue: new ChannelTaskQueue(),
+      logger: pino({ level: "silent" })
+    });
+
+    const binding: ChannelBinding = {
+      guildId: "guild-1",
+      channelId: "channel-4",
+      projectPath: "/tmp/project-d",
+      sandboxMode: "danger-full-access",
+      sandboxModeSource: "channel",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const submission = orchestrator.submit({
+      guildId: "guild-1",
+      channelId: "channel-4",
+      userId: "user-4",
+      prompt: "Make a commit.",
+      binding
+    });
+
+    await submission.completion;
+
+    expect(seenSandboxModes).toEqual(["danger-full-access"]);
   });
 });

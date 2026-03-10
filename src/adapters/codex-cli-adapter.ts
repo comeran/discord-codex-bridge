@@ -11,7 +11,6 @@ import type { CodexSandboxMode } from "../types/config.js";
 export interface CodexCliAdapterOptions {
   binaryPath: string;
   timeoutMs: number;
-  sandboxMode: CodexSandboxMode;
   logger: Logger;
 }
 
@@ -22,13 +21,45 @@ export interface BuildCodexExecArgsInput {
   sandboxMode: CodexSandboxMode;
 }
 
+export interface BuildCodexResumeArgsInput {
+  outputFile: string;
+  prompt: string;
+  sandboxMode: CodexSandboxMode;
+  sessionId: string;
+}
+
+export interface CodexCliCommandRequest {
+  args: string[];
+  cwd: string;
+  outputFile: string;
+}
+
+export interface CodexCliCommandResult {
+  durationMs: number;
+  exitCode: number | null;
+  outputLastMessage: string;
+  stderr: string;
+  stdout: string;
+  timedOut: boolean;
+}
+
+export type CodexCliCommandRunner = (
+  request: CodexCliCommandRequest
+) => Promise<CodexCliCommandResult>;
+
 export class CodexCliAdapter implements CodexAdapter {
-  public constructor(private readonly options: CodexCliAdapterOptions) {}
+  private readonly runCommand: CodexCliCommandRunner;
+
+  public constructor(
+    private readonly options: CodexCliAdapterOptions & {
+      runner?: CodexCliCommandRunner;
+    }
+  ) {
+    this.runCommand = options.runner ?? ((request) => this.runCodexCommand(request));
+  }
 
   public async execute(input: CodexExecuteInput): Promise<CodexExecuteResult> {
     const startedAt = Date.now();
-    const tempDir = await mkdtemp(path.join(tmpdir(), "discord-codex-bridge-"));
-    const outputFile = path.join(tempDir, "last-message.txt");
 
     try {
       await access(input.projectPath);
@@ -41,91 +72,32 @@ export class CodexCliAdapter implements CodexAdapter {
         );
       }
 
-      const prompt = buildPrompt(input.prompt, input.session?.historySummary);
-      const args = buildCodexExecArgs({
-        projectPath: input.projectPath,
-        outputFile,
-        prompt,
-        sandboxMode: this.options.sandboxMode
-      });
+      const existingSessionId = input.session?.lastCodexSessionId?.trim() || null;
 
-      this.options.logger.debug(
-        { taskId: input.taskId, projectPath: input.projectPath, args },
-        "Executing Codex CLI"
-      );
+      if (existingSessionId) {
+        const resumedResult = await this.executeResume(
+          input,
+          existingSessionId
+        );
 
-      const child = spawn(this.options.binaryPath, args, {
-        stdio: ["ignore", "pipe", "pipe"]
-      });
+        if (resumedResult.ok) {
+          return resumedResult;
+        }
 
-      let stdout = "";
-      let stderr = "";
-      let timedOut = false;
-
-      child.stdout.on("data", (chunk: Buffer | string) => {
-        stdout += chunk.toString();
-      });
-
-      child.stderr.on("data", (chunk: Buffer | string) => {
-        stderr += chunk.toString();
-      });
-
-      const timeoutHandle = setTimeout(() => {
-        timedOut = true;
-        child.kill("SIGTERM");
-
-        const hardKillHandle = setTimeout(() => {
-          child.kill("SIGKILL");
-        }, 5_000);
-
-        child.once("close", () => {
-          clearTimeout(hardKillHandle);
-        });
-      }, this.options.timeoutMs);
-
-      const exitCode = await new Promise<number | null>((resolve, reject) => {
-        child.once("error", reject);
-        child.once("close", (code) => {
-          resolve(code);
-        });
-      });
-
-      clearTimeout(timeoutHandle);
-
-      const content = await readOutputFile(outputFile, stdout);
-
-      if (timedOut) {
-        return {
-          ok: false,
-          content,
-          stderr: stderr.trim(),
-          exitCode,
-          durationMs: Date.now() - startedAt,
-          errorMessage: `Codex timed out after ${this.options.timeoutMs}ms.`
-        };
+        this.options.logger.warn(
+          {
+            taskId: input.taskId,
+            channelId: input.session?.channelId,
+            projectPath: input.projectPath,
+            sessionId: existingSessionId,
+            stderr: resumedResult.stderr,
+            exitCode: resumedResult.exitCode
+          },
+          "Codex resume failed; starting a fresh session"
+        );
       }
 
-      if (exitCode === 0) {
-        return {
-          ok: true,
-          content,
-          stderr: stderr.trim(),
-          exitCode,
-          durationMs: Date.now() - startedAt
-        };
-      }
-
-      return {
-        ok: false,
-        content,
-        stderr: stderr.trim(),
-        exitCode,
-        durationMs: Date.now() - startedAt,
-        errorMessage:
-          content.trim() ||
-          stderr.trim() ||
-          `Codex exited with code ${exitCode ?? "unknown"}.`
-      };
+      return await this.executeFresh(input);
     } catch (error) {
       const message =
         isNodeError(error) && error.code === "ENOENT"
@@ -135,8 +107,6 @@ export class CodexCliAdapter implements CodexAdapter {
             : "Unknown Codex execution error";
 
       return this.failureResult(message, startedAt);
-    } finally {
-      await rm(tempDir, { recursive: true, force: true });
     }
   }
 
@@ -151,6 +121,126 @@ export class CodexCliAdapter implements CodexAdapter {
       exitCode: null,
       durationMs: Date.now() - startedAt,
       errorMessage
+    };
+  }
+
+  private async executeFresh(
+    input: CodexExecuteInput
+  ): Promise<CodexExecuteResult> {
+    return await this.withTempOutputFile(async (outputFile) => {
+      const prompt = buildFreshPrompt(input.prompt, input.session?.historySummary);
+      const args = buildCodexExecArgs({
+        projectPath: input.projectPath,
+        outputFile,
+        prompt,
+        sandboxMode: input.sandboxMode
+      });
+
+      this.options.logger.debug(
+        { taskId: input.taskId, projectPath: input.projectPath, args },
+        "Executing Codex CLI with a fresh session"
+      );
+
+      const commandResult = await this.runCommand({
+        args,
+        cwd: input.projectPath,
+        outputFile
+      });
+
+      return normalizeCommandResult(commandResult, null);
+    });
+  }
+
+  private async executeResume(
+    input: CodexExecuteInput,
+    sessionId: string
+  ): Promise<CodexExecuteResult> {
+    return await this.withTempOutputFile(async (outputFile) => {
+      const args = buildCodexResumeArgs({
+        outputFile,
+        prompt: input.prompt,
+        sandboxMode: input.sandboxMode,
+        sessionId
+      });
+
+      this.options.logger.debug(
+        { taskId: input.taskId, projectPath: input.projectPath, sessionId, args },
+        "Resuming Codex CLI session"
+      );
+
+      const commandResult = await this.runCommand({
+        args,
+        cwd: input.projectPath,
+        outputFile
+      });
+
+      return normalizeCommandResult(commandResult, sessionId);
+    });
+  }
+
+  private async withTempOutputFile<T>(
+    run: (outputFile: string) => Promise<T>
+  ): Promise<T> {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "discord-codex-bridge-"));
+    const outputFile = path.join(tempDir, "last-message.txt");
+
+    try {
+      return await run(outputFile);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  private async runCodexCommand(
+    request: CodexCliCommandRequest
+  ): Promise<CodexCliCommandResult> {
+    const startedAt = Date.now();
+    const child = spawn(this.options.binaryPath, request.args, {
+      cwd: request.cwd,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk: Buffer | string) => {
+      stderr += chunk.toString();
+    });
+
+    const timeoutHandle = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+
+      const hardKillHandle = setTimeout(() => {
+        child.kill("SIGKILL");
+      }, 5_000);
+
+      child.once("close", () => {
+        clearTimeout(hardKillHandle);
+      });
+    }, this.options.timeoutMs);
+
+    const exitCode = await new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (code) => {
+        resolve(code);
+      });
+    });
+
+    clearTimeout(timeoutHandle);
+
+    return {
+      durationMs: Date.now() - startedAt,
+      exitCode,
+      outputLastMessage: await readOutputFile(request.outputFile, ""),
+      stderr: stderr.trim(),
+      stdout: stdout.trim(),
+      timedOut
     };
   }
 }
@@ -182,11 +272,16 @@ function buildPrompt(prompt: string, sessionSummary?: string): string {
   ].join("\n");
 }
 
+function buildFreshPrompt(prompt: string, sessionSummary?: string): string {
+  return buildPrompt(prompt, sessionSummary);
+}
+
 export function buildCodexExecArgs(
   input: BuildCodexExecArgsInput
 ): string[] {
   return [
     "exec",
+    "--json",
     "-C",
     input.projectPath,
     "--skip-git-repo-check",
@@ -198,6 +293,115 @@ export function buildCodexExecArgs(
     input.outputFile,
     input.prompt
   ];
+}
+
+export function buildCodexResumeArgs(
+  input: BuildCodexResumeArgsInput
+): string[] {
+  return [
+    "exec",
+    "resume",
+    "--json",
+    "-c",
+    `sandbox_mode="${input.sandboxMode}"`,
+    "--skip-git-repo-check",
+    "-o",
+    input.outputFile,
+    input.sessionId,
+    input.prompt
+  ];
+}
+
+export interface ParsedCodexJsonStream {
+  lastAssistantMessage: string;
+  threadId: string | null;
+}
+
+export function parseCodexJsonStream(stdout: string): ParsedCodexJsonStream {
+  let threadId: string | null = null;
+  let lastAssistantMessage = "";
+
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) {
+      continue;
+    }
+
+    try {
+      const event = JSON.parse(trimmed) as {
+        item?: { text?: string; type?: string };
+        thread_id?: string;
+        type?: string;
+      };
+
+      if (event.type === "thread.started" && typeof event.thread_id === "string") {
+        threadId = event.thread_id;
+      }
+
+      if (
+        event.type === "item.completed" &&
+        event.item?.type === "agent_message" &&
+        typeof event.item.text === "string"
+      ) {
+        lastAssistantMessage = event.item.text.trim();
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return {
+    lastAssistantMessage,
+    threadId
+  };
+}
+
+function normalizeCommandResult(
+  commandResult: CodexCliCommandResult,
+  fallbackSessionId: string | null
+): CodexExecuteResult {
+  const parsedStream = parseCodexJsonStream(commandResult.stdout);
+  const sessionId = parsedStream.threadId ?? fallbackSessionId;
+  const content =
+    commandResult.outputLastMessage.trim() ||
+    parsedStream.lastAssistantMessage ||
+    "";
+
+  if (commandResult.timedOut) {
+    return {
+      ok: false,
+      content,
+      stderr: commandResult.stderr,
+      exitCode: commandResult.exitCode,
+      durationMs: commandResult.durationMs,
+      ...(sessionId ? { sessionId } : {}),
+      errorMessage: "Codex timed out before producing a final response."
+    };
+  }
+
+  if (commandResult.exitCode === 0) {
+    return {
+      ok: true,
+      content,
+      stderr: commandResult.stderr,
+      exitCode: commandResult.exitCode,
+      durationMs: commandResult.durationMs,
+      ...(sessionId ? { sessionId } : {})
+    };
+  }
+
+  return {
+    ok: false,
+    content,
+    stderr: commandResult.stderr,
+    exitCode: commandResult.exitCode,
+    durationMs: commandResult.durationMs,
+    ...(sessionId ? { sessionId } : {}),
+    errorMessage:
+      content ||
+      commandResult.stderr ||
+      `Codex exited with code ${commandResult.exitCode ?? "unknown"}.`
+  };
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

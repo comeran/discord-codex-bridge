@@ -1,9 +1,14 @@
+import type { CodexSandboxMode } from "./config.js";
+
 export type TaskStatus = "queued" | "running" | "completed" | "failed";
+export type SandboxModeSource = "default" | "channel";
 
 export interface ChannelBinding {
   guildId: string;
   channelId: string;
   projectPath: string;
+  sandboxMode: CodexSandboxMode;
+  sandboxModeSource: SandboxModeSource;
   createdAt: string;
   updatedAt: string;
 }
