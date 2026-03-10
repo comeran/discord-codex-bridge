@@ -1,4 +1,5 @@
-import type { TaskExecutionResult } from "../types/domain.js";
+import type { ChannelStatusSnapshot } from "./channel-status-service.js";
+import type { ChannelBinding, TaskExecutionResult } from "../types/domain.js";
 
 const DISCORD_MESSAGE_LIMIT = 1_900;
 
@@ -43,6 +44,26 @@ export function formatHelpMessage(
     "/sandbox set mode:<read-only|workspace-write|danger-full-access>",
     "/sandbox reset",
     "频道中的普通消息会作为 Codex 任务执行。"
+  ].join("\n");
+}
+
+export function formatStatusMessage(
+  binding: ChannelBinding,
+  status: ChannelStatusSnapshot
+): string {
+  const sandboxSource =
+    binding.sandboxModeSource === "channel" ? "频道自定义" : "全局默认";
+
+  return [
+    `当前绑定项目：\`${binding.projectPath}\``,
+    `当前沙箱模式：\`${binding.sandboxMode}\` (${sandboxSource})`,
+    `当前状态：\`${status.state}\``,
+    `总待处理任务数：\`${status.pendingCount}\``,
+    `排队任务数：\`${status.queuedCount}\``,
+    `当前任务：\`${status.activeTaskId ?? "无"}\``,
+    `当前任务摘要：${status.activePromptPreview ?? "无"}`,
+    `当前 Codex 会话：\`${status.session?.lastCodexSessionId ?? "未记录"}\``,
+    `最近任务 ID：\`${status.session?.lastTaskId ?? "未记录"}\``
   ].join("\n");
 }
 
