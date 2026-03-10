@@ -76,7 +76,7 @@ function parseMcpServers(config: string): Array<{
       }
 
       current = {
-        name: section[1],
+        name: section[1] ?? "",
         command: null,
         args: []
       };
@@ -93,13 +93,13 @@ function parseMcpServers(config: string): Array<{
 
     const command = line.match(/^command\s*=\s*"(.+)"$/);
     if (command) {
-      current.command = command[1];
+      current.command = command[1] ?? null;
       continue;
     }
 
     const args = line.match(/^args\s*=\s*\[(.*)\]$/);
     if (args) {
-      current.args = parseTomlStringArray(args[1]);
+      current.args = parseTomlStringArray(args[1] ?? "");
     }
   }
 

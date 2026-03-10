@@ -1,9 +1,18 @@
 import { CodexCliAdapter } from "./adapters/codex-cli-adapter.js";
 import { DiscordBot } from "./bot/bot.js";
 import { DiscordMessageHandler } from "./bot/message-handler.js";
+import { McpCommandHandler } from "./bot/mcp-command-handler.js";
+import { ProjectCommandHandler } from "./bot/project-command-handler.js";
+import { RunCommandHandler } from "./bot/run-command-handler.js";
 import { SandboxCommandHandler } from "./bot/sandbox-command-handler.js";
+import { SessionCommandHandler } from "./bot/session-command-handler.js";
+import { SkillCommandHandler } from "./bot/skill-command-handler.js";
+import { StatusCommandHandler } from "./bot/status-command-handler.js";
 import { loadConfig } from "./config/env.js";
+import { ChannelStatusService } from "./core/channel-status-service.js";
 import { ChannelTaskQueue } from "./core/channel-task-queue.js";
+import { TomlMcpDiscoveryService } from "./core/mcp-discovery-service.js";
+import { FileSystemSkillDiscoveryService } from "./core/skill-discovery-service.js";
 import { TaskOrchestrator } from "./core/task-orchestrator.js";
 import { FileBindingStore } from "./store/binding-store.js";
 import { FileSessionStore } from "./store/session-store.js";
@@ -31,6 +40,12 @@ async function main(): Promise<void> {
     queue,
     logger
   });
+  const channelStatusService = new ChannelStatusService({
+    queue,
+    sessionStore
+  });
+  const skillDiscoveryService = FileSystemSkillDiscoveryService.fromCodexHome();
+  const mcpDiscoveryService = TomlMcpDiscoveryService.fromCodexHome();
 
   const handler = new DiscordMessageHandler({
     bindingStore,
@@ -47,11 +62,40 @@ async function main(): Promise<void> {
     bindingStore,
     logger
   });
+  const projectCommandHandler = new ProjectCommandHandler({
+    bindingStore,
+    logger
+  });
+  const sessionCommandHandler = new SessionCommandHandler({
+    sessionStore
+  });
+  const runCommandHandler = new RunCommandHandler({
+    bindingStore,
+    orchestrator
+  });
+  const statusCommandHandler = new StatusCommandHandler({
+    bindingStore,
+    statusService: channelStatusService
+  });
+  const skillCommandHandler = new SkillCommandHandler({
+    discoveryService: skillDiscoveryService
+  });
+  const mcpCommandHandler = new McpCommandHandler({
+    discoveryService: mcpDiscoveryService
+  });
 
   const bot = new DiscordBot({
     token: config.discord.token,
     handler,
-    sandboxCommandHandler,
+    commandHandlers: [
+      sandboxCommandHandler,
+      projectCommandHandler,
+      sessionCommandHandler,
+      runCommandHandler,
+      statusCommandHandler,
+      skillCommandHandler,
+      mcpCommandHandler
+    ],
     logger
   });
 

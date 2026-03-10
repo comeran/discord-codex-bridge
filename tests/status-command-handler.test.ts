@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import type { ChatInputCommandInteraction } from "discord.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { StatusCommandHandler } from "../src/bot/status-command-handler.js";
@@ -167,5 +168,5 @@ function createInteraction(options: {
     guildId: options.guildId,
     inGuild: () => true,
     reply: vi.fn(async () => {})
-  } as const;
+  } as unknown as ChatInputCommandInteraction;
 }

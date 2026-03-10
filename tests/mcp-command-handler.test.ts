@@ -1,3 +1,4 @@
+import type { ChatInputCommandInteraction } from "discord.js";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -104,5 +105,5 @@ function createInteraction(options: {
       getString: vi.fn((name: string) => options.strings?.[name] ?? null)
     },
     reply: vi.fn(async () => {})
-  } as const;
+  } as unknown as ChatInputCommandInteraction;
 }

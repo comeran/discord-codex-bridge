@@ -1,4 +1,6 @@
 import {
+  type ApplicationCommandDataResolvable,
+  type ChatInputCommandInteraction,
   Client,
   Events,
   type Guild,
@@ -9,15 +11,47 @@ import {
 import type { Logger } from "pino";
 
 import { DiscordMessageHandler } from "./message-handler.js";
-import {
-  SandboxCommandHandler,
-  sandboxCommandDefinition
-} from "./sandbox-command-handler.js";
+import { sandboxCommandDefinition } from "./sandbox-command-handler.js";
+import { projectCommandDefinition } from "./project-command-handler.js";
+import { sessionCommandDefinition } from "./session-command-handler.js";
+import { runCommandDefinition } from "./run-command-handler.js";
+import { statusCommandDefinition } from "./status-command-handler.js";
+import { skillCommandDefinition } from "./skill-command-handler.js";
+import { mcpCommandDefinition } from "./mcp-command-handler.js";
+
+export interface SlashCommandHandler {
+  handle(interaction: ChatInputCommandInteraction): Promise<boolean>;
+}
+
+export function buildGuildCommandDefinitions(): ApplicationCommandDataResolvable[] {
+  return [
+    sandboxCommandDefinition,
+    projectCommandDefinition,
+    sessionCommandDefinition,
+    runCommandDefinition,
+    statusCommandDefinition,
+    skillCommandDefinition,
+    mcpCommandDefinition
+  ];
+}
+
+export async function dispatchChatInputCommand(
+  interaction: ChatInputCommandInteraction,
+  handlers: SlashCommandHandler[]
+): Promise<boolean> {
+  for (const handler of handlers) {
+    if (await handler.handle(interaction)) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 export interface DiscordBotOptions {
   token: string;
   handler: DiscordMessageHandler;
-  sandboxCommandHandler: SandboxCommandHandler;
+  commandHandlers: SlashCommandHandler[];
   logger: Logger;
 }
 
@@ -84,7 +118,17 @@ export class DiscordBot {
     }
 
     try {
-      await this.options.sandboxCommandHandler.handle(interaction);
+      const handled = await dispatchChatInputCommand(
+        interaction,
+        this.options.commandHandlers
+      );
+
+      if (!handled && !interaction.replied && !interaction.deferred) {
+        await interaction.reply({
+          content: "未知命令或命令尚未启用。",
+          ephemeral: true
+        });
+      }
     } catch (error) {
       this.options.logger.error(
         {
@@ -115,7 +159,7 @@ export class DiscordBot {
 
   private async registerCommandsForGuild(guild: Guild): Promise<void> {
     try {
-      await guild.commands.set([sandboxCommandDefinition]);
+      await guild.commands.set(buildGuildCommandDefinitions());
       this.options.logger.info(
         { guildId: guild.id, guildName: guild.name },
         "Registered guild slash commands"

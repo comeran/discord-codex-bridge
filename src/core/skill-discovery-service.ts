@@ -107,9 +107,11 @@ function parseSkillMetadata(content: string): {
     };
   }
 
+  const body = frontmatter[1] ?? "";
+
   return {
-    name: extractFrontmatterValue(frontmatter[1], "name"),
-    description: extractFrontmatterValue(frontmatter[1], "description")
+    name: extractFrontmatterValue(body, "name"),
+    description: extractFrontmatterValue(body, "description")
   };
 }
 

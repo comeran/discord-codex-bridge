@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import type { ChatInputCommandInteraction } from "discord.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -112,5 +113,5 @@ function createInteraction(options: InteractionOptions) {
       getSubcommand: vi.fn(() => options.subcommand)
     },
     reply: vi.fn(async () => {})
-  } as const;
+  } as unknown as ChatInputCommandInteraction;
 }
