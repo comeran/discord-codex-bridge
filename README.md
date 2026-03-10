@@ -76,18 +76,43 @@ This MVP assumes a trusted Discord server. Any user with access to the bot can b
   Removes the current channel binding.
 - `!codex-help`
   Prints command help.
+- `/project bind path:<absolute-path>`
+  Binds the current channel to a project directory.
+- `/project show`
+  Shows the current channel project binding.
+- `/project unbind`
+  Removes the current channel project binding.
+- `/session show`
+  Shows the current channel session summary and saved Codex session id.
+- `/session reset`
+  Clears the current channel session metadata without unbinding the project.
+- `/run prompt:<text>`
+  Explicitly runs a Codex task in the current channel.
+- `/status`
+  Shows the current project path, queue depth, active task, and session state.
 - `/sandbox show`
   Shows the effective sandbox mode for the current channel.
 - `/sandbox set mode:<read-only|workspace-write|danger-full-access>`
   Sets a channel-specific sandbox mode override.
 - `/sandbox reset`
   Resets the channel back to the global default sandbox mode.
+- `/skill list`
+  Lists locally available Codex skills discovered from the local Codex home.
+- `/skill show name:<skill>`
+  Shows one discovered local skill.
+- `/mcp list`
+  Lists MCP servers configured in local Codex config.
+- `/mcp show name:<server>`
+  Shows one configured MCP server.
 
 Any non-command message posted in a bound channel is treated as a Codex task.
 
 `danger-full-access` is high risk. In that mode, later tasks in the
 channel can write `.git`, create commits, and run more dangerous local
 commands.
+
+The command surface intentionally excludes login, token entry, raw Codex
+CLI passthrough, deployment, and publish workflows.
 
 ## Data files
 

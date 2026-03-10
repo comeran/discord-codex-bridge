@@ -37,13 +37,27 @@ export function formatHelpMessage(
 ): string {
   return [
     "可用命令：",
+    "文本命令：",
     `${bindCommand} /absolute/path/to/project`,
     `${bindingCommand}`,
     `${unbindCommand}`,
+    "Slash 命令：",
+    "/project bind path:<absolute-path>",
+    "/project show",
+    "/project unbind",
+    "/session show",
+    "/session reset",
+    "/run prompt:<text>",
+    "/status",
     "/sandbox show",
     "/sandbox set mode:<read-only|workspace-write|danger-full-access>",
     "/sandbox reset",
-    "频道中的普通消息会作为 Codex 任务执行。"
+    "/skill list",
+    "/skill show name:<skill>",
+    "/mcp list",
+    "/mcp show name:<server>",
+    "频道中的普通消息仍会作为 Codex 任务执行。",
+    "不支持登录、token 录入、raw CLI 透传或部署发布命令。"
   ].join("\n");
 }
 
