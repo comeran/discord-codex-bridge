@@ -1,6 +1,24 @@
+export type QueueTaskType = "run" | "review";
+
 export interface QueueTaskMetadata {
   taskId?: string;
+  taskType?: QueueTaskType;
   promptPreview?: string;
+  onCancel?: () => Promise<void> | void;
+}
+
+export interface QueueCancellationResult {
+  taskId: string | null;
+  taskType: QueueTaskType | null;
+  promptPreview: string | null;
+  scope: "active" | "queued";
+}
+
+export class QueueTaskCancelledError extends Error {
+  public constructor(public readonly taskId: string | null) {
+    super(taskId ? `Task ${taskId} was cancelled.` : "Task was cancelled.");
+    this.name = "QueueTaskCancelledError";
+  }
 }
 
 export interface ChannelQueueRuntimeState {
@@ -8,33 +26,54 @@ export interface ChannelQueueRuntimeState {
   queuedCount: number;
   isRunning: boolean;
   activeTaskId: string | null;
+  activeTaskType: QueueTaskType | null;
   activePromptPreview: string | null;
+  hasCancellableTask: boolean;
 }
 
 interface QueueState {
-  pending: number;
-  tail: Promise<void>;
-  activeTask: QueueTaskMetadata | null;
-  isRunning: boolean;
+  activeTask: QueueTaskEntry<unknown> | null;
+  pendingTasks: Array<QueueTaskEntry<unknown>>;
+}
+
+interface QueueTaskEntry<T> {
+  task: () => Promise<T>;
+  metadata: QueueTaskMetadata;
+  deferred: Deferred<T>;
+}
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
 }
 
 export class ChannelTaskQueue {
   private readonly states = new Map<string, QueueState>();
 
   public getPendingCount(channelId: string): number {
-    return this.states.get(channelId)?.pending ?? 0;
+    const state = this.states.get(channelId);
+    if (!state) {
+      return 0;
+    }
+
+    return state.pendingTasks.length + (state.activeTask ? 1 : 0);
   }
 
   public getRuntimeState(channelId: string): ChannelQueueRuntimeState {
     const state = this.states.get(channelId);
-    const pendingCount = state?.pending ?? 0;
+    const activeTask = state?.activeTask ?? null;
 
     return {
-      pendingCount,
-      queuedCount: Math.max(pendingCount - (state?.isRunning ? 1 : 0), 0),
-      isRunning: state?.isRunning ?? false,
-      activeTaskId: state?.activeTask?.taskId ?? null,
-      activePromptPreview: state?.activeTask?.promptPreview ?? null
+      pendingCount: this.getPendingCount(channelId),
+      queuedCount: state?.pendingTasks.length ?? 0,
+      isRunning: activeTask !== null,
+      activeTaskId: activeTask?.metadata.taskId ?? null,
+      activeTaskType: activeTask?.metadata.taskType ?? null,
+      activePromptPreview: activeTask?.metadata.promptPreview ?? null,
+      hasCancellableTask:
+        activeTask?.metadata.onCancel !== undefined ||
+        (state?.pendingTasks.length ?? 0) > 0
     };
   }
 
@@ -43,44 +82,133 @@ export class ChannelTaskQueue {
     task: () => Promise<T>,
     metadata: QueueTaskMetadata = {}
   ): Promise<T> {
-    const state = this.states.get(channelId) ?? {
-      pending: 0,
-      tail: Promise.resolve(),
-      activeTask: null,
-      isRunning: false
+    const state = this.getOrCreateState(channelId);
+    const deferred = createDeferred<T>();
+    const entry: QueueTaskEntry<T> = {
+      task,
+      metadata,
+      deferred
     };
 
-    state.pending += 1;
+    if (!state.activeTask) {
+      this.startEntry(channelId, state, entry);
+    } else {
+      state.pendingTasks.push(entry);
+    }
 
-    const result = state.tail.catch(ignoreError).then(async () => {
-      state.isRunning = true;
-      state.activeTask = metadata;
+    return deferred.promise;
+  }
 
-      try {
-        return await task();
-      } finally {
-        state.isRunning = false;
-        state.activeTask = null;
+  public async cancelActive(
+    channelId: string
+  ): Promise<QueueCancellationResult | null> {
+    const state = this.states.get(channelId);
+    const activeTask = state?.activeTask;
+    if (!activeTask) {
+      return null;
+    }
+
+    await activeTask.metadata.onCancel?.();
+
+    return toCancellationResult(activeTask.metadata, "active");
+  }
+
+  public async cancelNext(
+    channelId: string
+  ): Promise<QueueCancellationResult | null> {
+    const state = this.states.get(channelId);
+    const nextTask = state?.pendingTasks.shift();
+    if (!state || !nextTask) {
+      return null;
+    }
+
+    nextTask.deferred.reject(
+      new QueueTaskCancelledError(nextTask.metadata.taskId ?? null)
+    );
+    this.cleanupState(channelId, state);
+
+    return toCancellationResult(nextTask.metadata, "queued");
+  }
+
+  private getOrCreateState(channelId: string): QueueState {
+    const existing = this.states.get(channelId);
+    if (existing) {
+      return existing;
+    }
+
+    const created: QueueState = {
+      activeTask: null,
+      pendingTasks: []
+    };
+    this.states.set(channelId, created);
+    return created;
+  }
+
+  private startEntry<T>(
+    channelId: string,
+    state: QueueState,
+    entry: QueueTaskEntry<T>
+  ): void {
+    state.activeTask = entry as QueueTaskEntry<unknown>;
+
+    void entry.task().then(
+      (value) => {
+        entry.deferred.resolve(value);
+      },
+      (error) => {
+        entry.deferred.reject(error);
       }
-    });
-
-    state.tail = result.then(ignoreVoid, ignoreVoid);
-    this.states.set(channelId, state);
-
-    return result.finally(() => {
+    ).finally(() => {
       const current = this.states.get(channelId);
-      if (!current) {
+      if (!current || current.activeTask !== entry) {
         return;
       }
 
-      current.pending -= 1;
-      if (current.pending <= 0) {
-        this.states.delete(channelId);
+      current.activeTask = null;
+      const nextTask = current.pendingTasks.shift();
+      if (nextTask) {
+        this.startEntry(channelId, current, nextTask);
+        return;
       }
+
+      this.cleanupState(channelId, current);
     });
+  }
+
+  private cleanupState(channelId: string, state: QueueState): void {
+    if (!state.activeTask && state.pendingTasks.length === 0) {
+      this.states.delete(channelId);
+    }
   }
 }
 
-function ignoreError(): void {}
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
 
-function ignoreVoid(): void {}
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  promise.catch(ignorePromiseRejection);
+
+  return {
+    promise,
+    resolve,
+    reject
+  };
+}
+
+function toCancellationResult(
+  metadata: QueueTaskMetadata,
+  scope: "active" | "queued"
+): QueueCancellationResult {
+  return {
+    taskId: metadata.taskId ?? null,
+    taskType: metadata.taskType ?? null,
+    promptPreview: metadata.promptPreview ?? null,
+    scope
+  };
+}
+
+function ignorePromiseRejection(): void {}
