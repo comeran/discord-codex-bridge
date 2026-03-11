@@ -12,7 +12,11 @@ import type {
   TaskSubmission
 } from "../types/domain.js";
 import type { SessionStore } from "../store/session-store.js";
-import { ChannelTaskQueue, QueueTaskCancelledError } from "./channel-task-queue.js";
+import {
+  ChannelTaskQueue,
+  type QueueCancellationResult,
+  QueueTaskCancelledError
+} from "./channel-task-queue.js";
 
 export interface TaskOrchestratorDeps {
   codexAdapter: CodexAdapter;
@@ -21,11 +25,27 @@ export interface TaskOrchestratorDeps {
   logger: Logger;
 }
 
+export type TaskCancellationResult = QueueCancellationResult;
+
 export class TaskOrchestrator {
   public constructor(private readonly deps: TaskOrchestratorDeps) {}
 
   public submit(request: TaskRequest): TaskSubmission {
     const taskType = request.taskType ?? "run";
+    const abortController = new AbortController();
+
+    if (request.abortSignal?.aborted) {
+      abortController.abort();
+    } else {
+      request.abortSignal?.addEventListener(
+        "abort",
+        () => {
+          abortController.abort();
+        },
+        { once: true }
+      );
+    }
+
     const task: TaskRecord = {
       taskId: randomUUID(),
       taskType,
@@ -42,11 +62,14 @@ export class TaskOrchestrator {
     const completion = this.deps.queue
       .enqueue(
         request.channelId,
-        async () => this.runTask(task, request.binding, request.abortSignal),
+        async () => this.runTask(task, request.binding, abortController.signal),
         {
           taskId: task.taskId,
           taskType,
-          promptPreview: truncateForSummary(task.prompt, 120)
+          promptPreview: truncateForSummary(task.prompt, 120),
+          onCancel: () => {
+            abortController.abort();
+          }
         }
       )
       .catch((error) => this.mapQueueCancellation(task, error));
@@ -56,6 +79,15 @@ export class TaskOrchestrator {
       queuedAhead,
       completion
     };
+  }
+
+  public async cancel(channelId: string): Promise<TaskCancellationResult | null> {
+    const activeTask = await this.deps.queue.cancelActive(channelId);
+    if (activeTask) {
+      return activeTask;
+    }
+
+    return await this.deps.queue.cancelNext(channelId);
   }
 
   private async runTask(

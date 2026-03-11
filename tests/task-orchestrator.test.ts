@@ -341,4 +341,81 @@ describe("TaskOrchestrator", () => {
     expect(session?.historySummary).toBe("Last request: add tests\nLast result: done");
     expect(session?.lastTaskId).toBe("task-existing");
   });
+
+  it("cancels the running task through the orchestrator", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "orchestrator-test-"));
+    tempDirs.push(tempDir);
+
+    const sessionStore = FileSessionStore.fromFile(path.join(tempDir, "sessions.json"));
+    let taskStarted!: () => void;
+    const running = new Promise<void>((resolve) => {
+      taskStarted = resolve;
+    });
+
+    const adapter: CodexAdapter = {
+      execute: vi.fn(async (input) => {
+        taskStarted();
+
+        if (!input.abortSignal?.aborted) {
+          await new Promise<void>((resolve) => {
+            input.abortSignal?.addEventListener(
+              "abort",
+              () => {
+                resolve();
+              },
+              { once: true }
+            );
+          });
+        }
+
+        return {
+          ok: false,
+          cancelled: true,
+          content: "",
+          stderr: "",
+          exitCode: null,
+          durationMs: 35,
+          errorMessage: "Codex execution was cancelled."
+        };
+      })
+    };
+
+    const orchestrator = new TaskOrchestrator({
+      codexAdapter: adapter,
+      sessionStore,
+      queue: new ChannelTaskQueue(),
+      logger: pino({ level: "silent" })
+    });
+
+    const binding: ChannelBinding = {
+      guildId: "guild-1",
+      channelId: "channel-7",
+      projectPath: "/tmp/project-g",
+      sandboxMode: "workspace-write",
+      sandboxModeSource: "default",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const submission = orchestrator.submit({
+      guildId: "guild-1",
+      channelId: "channel-7",
+      userId: "user-7",
+      prompt: "Run a task that will be cancelled.",
+      taskType: "run",
+      binding
+    });
+
+    await running;
+
+    const cancelled = await orchestrator.cancel("channel-7");
+    const result = await submission.completion;
+
+    expect(cancelled).toMatchObject({
+      taskId: submission.taskId,
+      taskType: "run",
+      scope: "active"
+    });
+    expect(result.status).toBe("cancelled");
+  });
 });
