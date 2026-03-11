@@ -1,6 +1,12 @@
 import type { CodexSandboxMode } from "./config.js";
 
-export type TaskStatus = "queued" | "running" | "completed" | "failed";
+export type TaskType = "run" | "review";
+export type TaskStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
 export type SandboxModeSource = "default" | "channel";
 
 export interface ChannelBinding {
@@ -23,6 +29,7 @@ export interface ChannelSession {
 
 export interface TaskRecord {
   taskId: string;
+  taskType?: TaskType;
   guildId: string;
   channelId: string;
   userId: string;
@@ -40,12 +47,14 @@ export interface TaskRequest {
   channelId: string;
   userId: string;
   prompt: string;
+  taskType?: TaskType;
+  abortSignal?: AbortSignal;
   binding: ChannelBinding;
 }
 
 export interface TaskExecutionResult {
   task: TaskRecord;
-  status: Extract<TaskStatus, "completed" | "failed">;
+  status: Extract<TaskStatus, "completed" | "failed" | "cancelled">;
   output: string;
   durationMs: number;
   stderr?: string;

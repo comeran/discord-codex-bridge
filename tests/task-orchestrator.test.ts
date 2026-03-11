@@ -233,4 +233,112 @@ describe("TaskOrchestrator", () => {
 
     expect(seenSandboxModes).toEqual(["danger-full-access"]);
   });
+
+  it("preserves review task type through orchestration", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "orchestrator-test-"));
+    tempDirs.push(tempDir);
+
+    const sessionStore = FileSessionStore.fromFile(path.join(tempDir, "sessions.json"));
+    const adapter: CodexAdapter = {
+      execute: vi.fn(async () => ({
+        ok: true,
+        content: "Review completed.",
+        stderr: "",
+        exitCode: 0,
+        durationMs: 60,
+        sessionId: "session-review"
+      }))
+    };
+
+    const orchestrator = new TaskOrchestrator({
+      codexAdapter: adapter,
+      sessionStore,
+      queue: new ChannelTaskQueue(),
+      logger: pino({ level: "silent" })
+    });
+
+    const binding: ChannelBinding = {
+      guildId: "guild-1",
+      channelId: "channel-5",
+      projectPath: "/tmp/project-e",
+      sandboxMode: "workspace-write",
+      sandboxModeSource: "default",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const submission = orchestrator.submit({
+      guildId: "guild-1",
+      channelId: "channel-5",
+      userId: "user-5",
+      prompt: "Review the latest changes.",
+      taskType: "review",
+      binding
+    });
+
+    const result = await submission.completion;
+
+    expect(result.status).toBe("completed");
+    expect(result.task.taskType).toBe("review");
+  });
+
+  it("maps adapter cancellation into a cancelled task result without overwriting session history", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "orchestrator-test-"));
+    tempDirs.push(tempDir);
+
+    const sessionStore = FileSessionStore.fromFile(path.join(tempDir, "sessions.json"));
+    await sessionStore.upsert({
+      channelId: "channel-6",
+      historySummary: "Last request: add tests\nLast result: done",
+      lastCodexSessionId: "session-existing",
+      lastTaskId: "task-existing"
+    });
+
+    const adapter: CodexAdapter = {
+      execute: vi.fn(async () => ({
+        ok: false,
+        cancelled: true,
+        content: "",
+        stderr: "",
+        exitCode: null,
+        durationMs: 20,
+        errorMessage: "Codex execution was cancelled."
+      }))
+    };
+
+    const orchestrator = new TaskOrchestrator({
+      codexAdapter: adapter,
+      sessionStore,
+      queue: new ChannelTaskQueue(),
+      logger: pino({ level: "silent" })
+    });
+
+    const binding: ChannelBinding = {
+      guildId: "guild-1",
+      channelId: "channel-6",
+      projectPath: "/tmp/project-f",
+      sandboxMode: "workspace-write",
+      sandboxModeSource: "default",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const submission = orchestrator.submit({
+      guildId: "guild-1",
+      channelId: "channel-6",
+      userId: "user-6",
+      prompt: "Run a cancellable task.",
+      taskType: "run",
+      binding
+    });
+
+    const result = await submission.completion;
+    const session = await sessionStore.getByChannelId("channel-6");
+
+    expect(result.status).toBe("cancelled");
+    expect(result.task.status).toBe("cancelled");
+    expect(result.task.error).toBe("Codex execution was cancelled.");
+    expect(session?.historySummary).toBe("Last request: add tests\nLast result: done");
+    expect(session?.lastTaskId).toBe("task-existing");
+  });
 });

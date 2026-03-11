@@ -32,14 +32,14 @@ export interface ChannelQueueRuntimeState {
 }
 
 interface QueueState {
-  activeTask: QueueTaskEntry<unknown> | null;
-  pendingTasks: Array<QueueTaskEntry<unknown>>;
+  activeTask: QueueTaskEntry | null;
+  pendingTasks: QueueTaskEntry[];
 }
 
-interface QueueTaskEntry<T> {
-  task: () => Promise<T>;
+interface QueueTaskEntry {
+  task: () => Promise<unknown>;
   metadata: QueueTaskMetadata;
-  deferred: Deferred<T>;
+  deferred: Deferred<unknown>;
 }
 
 interface Deferred<T> {
@@ -84,10 +84,10 @@ export class ChannelTaskQueue {
   ): Promise<T> {
     const state = this.getOrCreateState(channelId);
     const deferred = createDeferred<T>();
-    const entry: QueueTaskEntry<T> = {
-      task,
+    const entry: QueueTaskEntry = {
+      task: task as () => Promise<unknown>,
       metadata,
-      deferred
+      deferred: deferred as Deferred<unknown>
     };
 
     if (!state.activeTask) {
@@ -144,12 +144,12 @@ export class ChannelTaskQueue {
     return created;
   }
 
-  private startEntry<T>(
+  private startEntry(
     channelId: string,
     state: QueueState,
-    entry: QueueTaskEntry<T>
+    entry: QueueTaskEntry
   ): void {
-    state.activeTask = entry as QueueTaskEntry<unknown>;
+    state.activeTask = entry;
 
     void entry.task().then(
       (value) => {

@@ -12,7 +12,7 @@ import type {
   TaskSubmission
 } from "../types/domain.js";
 import type { SessionStore } from "../store/session-store.js";
-import { ChannelTaskQueue } from "./channel-task-queue.js";
+import { ChannelTaskQueue, QueueTaskCancelledError } from "./channel-task-queue.js";
 
 export interface TaskOrchestratorDeps {
   codexAdapter: CodexAdapter;
@@ -25,8 +25,10 @@ export class TaskOrchestrator {
   public constructor(private readonly deps: TaskOrchestratorDeps) {}
 
   public submit(request: TaskRequest): TaskSubmission {
+    const taskType = request.taskType ?? "run";
     const task: TaskRecord = {
       taskId: randomUUID(),
+      taskType,
       guildId: request.guildId,
       channelId: request.channelId,
       userId: request.userId,
@@ -37,9 +39,17 @@ export class TaskOrchestrator {
     };
 
     const queuedAhead = this.deps.queue.getPendingCount(request.channelId);
-    const completion = this.deps.queue.enqueue(request.channelId, async () =>
-      this.runTask(task, request.binding)
-    );
+    const completion = this.deps.queue
+      .enqueue(
+        request.channelId,
+        async () => this.runTask(task, request.binding, request.abortSignal),
+        {
+          taskId: task.taskId,
+          taskType,
+          promptPreview: truncateForSummary(task.prompt, 120)
+        }
+      )
+      .catch((error) => this.mapQueueCancellation(task, error));
 
     return {
       taskId: task.taskId,
@@ -50,7 +60,8 @@ export class TaskOrchestrator {
 
   private async runTask(
     task: TaskRecord,
-    binding: ChannelBinding
+    binding: ChannelBinding,
+    abortSignal?: AbortSignal
   ): Promise<TaskExecutionResult> {
     const logger = this.deps.logger.child({
       taskId: task.taskId,
@@ -74,8 +85,31 @@ export class TaskOrchestrator {
         projectPath: binding.projectPath,
         prompt: task.prompt,
         sandboxMode: binding.sandboxMode,
-        session
+        session,
+        ...(abortSignal ? { abortSignal } : {})
       });
+
+      if (result.cancelled) {
+        const cancelledTask: TaskRecord = {
+          ...runningTask,
+          status: "cancelled",
+          finishedAt: new Date().toISOString(),
+          error: result.errorMessage?.trim() || "Codex execution was cancelled."
+        };
+
+        logger.info(
+          { phase: "task.cancelled", durationMs: result.durationMs },
+          "Codex task cancelled"
+        );
+
+        return {
+          task: cancelledTask,
+          status: "cancelled",
+          output: "",
+          durationMs: result.durationMs,
+          ...(cancelledTask.error ? { error: cancelledTask.error } : {})
+        };
+      }
 
       const finishedAt = new Date().toISOString();
       const nextSession = buildNextSession(
@@ -168,6 +202,28 @@ export class TaskOrchestrator {
         error: message
       };
     }
+  }
+
+  private mapQueueCancellation(
+    task: TaskRecord,
+    error: unknown
+  ): TaskExecutionResult {
+    if (!(error instanceof QueueTaskCancelledError)) {
+      throw error;
+    }
+
+    return {
+      task: {
+        ...task,
+        status: "cancelled",
+        finishedAt: new Date().toISOString(),
+        error: error.message
+      },
+      status: "cancelled",
+      output: "",
+      durationMs: 0,
+      error: error.message
+    };
   }
 }
 
