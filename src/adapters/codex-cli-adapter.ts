@@ -32,6 +32,7 @@ export interface CodexCliCommandRequest {
   args: string[];
   cwd: string;
   outputFile: string;
+  abortSignal?: AbortSignal;
 }
 
 export interface CodexCliCommandResult {
@@ -41,6 +42,7 @@ export interface CodexCliCommandResult {
   stderr: string;
   stdout: string;
   timedOut: boolean;
+  cancelled: boolean;
 }
 
 export type CodexCliCommandRunner = (
@@ -81,6 +83,10 @@ export class CodexCliAdapter implements CodexAdapter {
         );
 
         if (resumedResult.ok) {
+          return resumedResult;
+        }
+
+        if (resumedResult.cancelled) {
           return resumedResult;
         }
 
@@ -144,7 +150,8 @@ export class CodexCliAdapter implements CodexAdapter {
       const commandResult = await this.runCommand({
         args,
         cwd: input.projectPath,
-        outputFile
+        outputFile,
+        ...(input.abortSignal ? { abortSignal: input.abortSignal } : {})
       });
 
       return normalizeCommandResult(commandResult, null);
@@ -171,7 +178,8 @@ export class CodexCliAdapter implements CodexAdapter {
       const commandResult = await this.runCommand({
         args,
         cwd: input.projectPath,
-        outputFile
+        outputFile,
+        ...(input.abortSignal ? { abortSignal: input.abortSignal } : {})
       });
 
       return normalizeCommandResult(commandResult, sessionId);
@@ -195,6 +203,18 @@ export class CodexCliAdapter implements CodexAdapter {
     request: CodexCliCommandRequest
   ): Promise<CodexCliCommandResult> {
     const startedAt = Date.now();
+    if (request.abortSignal?.aborted) {
+      return {
+        durationMs: Date.now() - startedAt,
+        exitCode: null,
+        outputLastMessage: await readOutputFile(request.outputFile, ""),
+        stderr: "",
+        stdout: "",
+        timedOut: false,
+        cancelled: true
+      };
+    }
+
     const child = spawn(this.options.binaryPath, request.args, {
       cwd: request.cwd,
       stdio: ["ignore", "pipe", "pipe"]
@@ -203,6 +223,19 @@ export class CodexCliAdapter implements CodexAdapter {
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let cancelled = false;
+    let hardKillHandle: NodeJS.Timeout | null = null;
+
+    const abortHandler = () => {
+      cancelled = true;
+      child.kill("SIGTERM");
+
+      hardKillHandle = setTimeout(() => {
+        child.kill("SIGKILL");
+      }, 5_000);
+    };
+
+    request.abortSignal?.addEventListener("abort", abortHandler, { once: true });
 
     child.stdout.on("data", (chunk: Buffer | string) => {
       stdout += chunk.toString();
@@ -216,12 +249,14 @@ export class CodexCliAdapter implements CodexAdapter {
       timedOut = true;
       child.kill("SIGTERM");
 
-      const hardKillHandle = setTimeout(() => {
+      hardKillHandle = setTimeout(() => {
         child.kill("SIGKILL");
       }, 5_000);
 
       child.once("close", () => {
-        clearTimeout(hardKillHandle);
+        if (hardKillHandle) {
+          clearTimeout(hardKillHandle);
+        }
       });
     }, this.options.timeoutMs);
 
@@ -233,6 +268,10 @@ export class CodexCliAdapter implements CodexAdapter {
     });
 
     clearTimeout(timeoutHandle);
+    request.abortSignal?.removeEventListener("abort", abortHandler);
+    if (hardKillHandle) {
+      clearTimeout(hardKillHandle);
+    }
 
     return {
       durationMs: Date.now() - startedAt,
@@ -240,7 +279,8 @@ export class CodexCliAdapter implements CodexAdapter {
       outputLastMessage: await readOutputFile(request.outputFile, ""),
       stderr: stderr.trim(),
       stdout: stdout.trim(),
-      timedOut
+      timedOut,
+      cancelled
     };
   }
 }
@@ -376,6 +416,19 @@ function normalizeCommandResult(
       durationMs: commandResult.durationMs,
       ...(sessionId ? { sessionId } : {}),
       errorMessage: "Codex timed out before producing a final response."
+    };
+  }
+
+  if (commandResult.cancelled) {
+    return {
+      ok: false,
+      content,
+      stderr: commandResult.stderr,
+      exitCode: commandResult.exitCode,
+      durationMs: commandResult.durationMs,
+      cancelled: true,
+      ...(sessionId ? { sessionId } : {}),
+      errorMessage: "Codex execution was cancelled."
     };
   }
 

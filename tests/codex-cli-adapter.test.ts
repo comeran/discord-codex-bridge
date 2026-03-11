@@ -98,7 +98,8 @@ describe("CodexCliAdapter", () => {
         '{"type":"thread.started","thread_id":"session-fresh"}',
         '{"type":"item.completed","item":{"type":"agent_message","text":"Fresh execution result"}}'
       ].join("\n"),
-      timedOut: false
+      timedOut: false,
+      cancelled: false
     }));
 
     const adapter = new CodexCliAdapter({
@@ -134,7 +135,8 @@ describe("CodexCliAdapter", () => {
         outputLastMessage: "",
         stderr: "resume failed",
         stdout: "",
-        timedOut: false
+        timedOut: false,
+        cancelled: false
       })
       .mockResolvedValueOnce({
         durationMs: 30,
@@ -145,7 +147,8 @@ describe("CodexCliAdapter", () => {
           '{"type":"thread.started","thread_id":"session-fallback"}',
           '{"type":"item.completed","item":{"type":"agent_message","text":"Fresh fallback result"}}'
         ].join("\n"),
-        timedOut: false
+        timedOut: false,
+        cancelled: false
       });
 
     const adapter = new CodexCliAdapter({
@@ -189,5 +192,60 @@ describe("CodexCliAdapter", () => {
     expect(runner.mock.calls[1]?.[0].args.at(-1)).toContain(
       "Channel context summary:"
     );
+  });
+
+  it("passes an abort signal to the command runner and reports cancellation", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "codex-adapter-test-"));
+    tempDirs.push(tempDir);
+
+    const controller = new AbortController();
+    const runner = vi.fn<CodexCliCommandRunner>(async (request) => {
+      expect(request.abortSignal).toBe(controller.signal);
+
+      if (!request.abortSignal?.aborted) {
+        await new Promise<void>((resolve) => {
+          request.abortSignal?.addEventListener(
+            "abort",
+            () => {
+              resolve();
+            },
+            { once: true }
+          );
+        });
+      }
+
+      return {
+        durationMs: 15,
+        exitCode: null,
+        outputLastMessage: "",
+        stderr: "",
+        stdout: "",
+        timedOut: false,
+        cancelled: true
+      };
+    });
+
+    const adapter = new CodexCliAdapter({
+      binaryPath: "codex",
+      timeoutMs: 1_000,
+      logger: pino({ level: "silent" }),
+      runner
+    });
+
+    const execution = adapter.execute({
+      taskId: "task-3",
+      projectPath: tempDir,
+      prompt: "Do cancellable work.",
+      sandboxMode: "workspace-write",
+      abortSignal: controller.signal
+    });
+
+    controller.abort();
+
+    const result = await execution;
+
+    expect(result.ok).toBe(false);
+    expect(result.cancelled).toBe(true);
+    expect(result.errorMessage).toBe("Codex execution was cancelled.");
   });
 });

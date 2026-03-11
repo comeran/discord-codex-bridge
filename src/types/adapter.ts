@@ -7,6 +7,7 @@ export interface CodexExecuteInput {
   prompt: string;
   sandboxMode: CodexSandboxMode;
   session?: ChannelSession | null;
+  abortSignal?: AbortSignal;
 }
 
 export interface CodexExecuteResult {
@@ -17,6 +18,7 @@ export interface CodexExecuteResult {
   durationMs: number;
   sessionId?: string | null;
   errorMessage?: string;
+  cancelled?: boolean;
 }
 
 export interface CodexAdapter {
