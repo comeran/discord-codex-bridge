@@ -72,6 +72,9 @@ export function formatHelpMessage(
     "/session show",
     "/session reset",
     "/run prompt:<text>",
+    "/review",
+    "/review prompt:<text>",
+    "/cancel",
     "/status",
     "/sandbox show",
     "/sandbox set mode:<read-only|workspace-write|danger-full-access>",
@@ -81,6 +84,7 @@ export function formatHelpMessage(
     "/mcp list",
     "/mcp show name:<server>",
     "频道中的普通消息仍会作为 Codex 任务执行。",
+    "/cancel 会优先终止当前本地 Codex 任务；如果当前没有运行中的任务，则取消下一个排队任务。",
     "不支持登录、token 录入、raw CLI 透传或部署发布命令。"
   ].join("\n");
 }

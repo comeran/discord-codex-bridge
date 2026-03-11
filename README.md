@@ -88,6 +88,12 @@ This MVP assumes a trusted Discord server. Any user with access to the bot can b
   Clears the current channel session metadata without unbinding the project.
 - `/run prompt:<text>`
   Explicitly runs a Codex task in the current channel.
+- `/review`
+  Runs the default findings-first code review prompt for the current project.
+- `/review prompt:<text>`
+  Runs a review task with a custom review instruction.
+- `/cancel`
+  Cancels the current channel task. It prefers stopping the running local Codex process and otherwise removes the next queued task.
 - `/status`
   Shows the current project path, queue depth, active task, and session state.
 - `/sandbox show`

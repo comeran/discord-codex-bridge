@@ -9,9 +9,12 @@ describe("formatHelpMessage", () => {
     expect(help).toContain("/project bind path:<absolute-path>");
     expect(help).toContain("/session show");
     expect(help).toContain("/run prompt:<text>");
+    expect(help).toContain("/review");
+    expect(help).toContain("/cancel");
     expect(help).toContain("/status");
     expect(help).toContain("/skill list");
     expect(help).toContain("/mcp list");
+    expect(help).toContain("终止当前本地 Codex 任务");
     expect(help).toContain("不支持登录、token");
   });
 });
