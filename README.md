@@ -1,5 +1,7 @@
 # discord-codex-bridge
 
+[English](./README.md) | [简体中文](./README.zh-CN.md)
+
 `discord-codex-bridge` is a minimal Discord-to-Codex bridge built for a trusted local environment. Each Discord channel binds to one local project directory, maintains its own channel session metadata, and executes tasks serially through the local `codex exec` CLI.
 
 ## MVP features
