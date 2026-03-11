@@ -13,7 +13,9 @@ export interface ChannelStatusSnapshot {
   pendingCount: number;
   queuedCount: number;
   activeTaskId: string | null;
+  activeTaskType: "run" | "review" | null;
   activePromptPreview: string | null;
+  hasCancellableTask: boolean;
   session: ChannelSession | null;
 }
 
@@ -32,7 +34,9 @@ export class ChannelStatusService {
       pendingCount: runtime.pendingCount,
       queuedCount: runtime.queuedCount,
       activeTaskId: runtime.activeTaskId,
+      activeTaskType: runtime.activeTaskType,
       activePromptPreview: runtime.activePromptPreview,
+      hasCancellableTask: runtime.hasCancellableTask,
       session
     };
   }

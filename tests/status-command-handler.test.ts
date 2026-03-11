@@ -70,7 +70,9 @@ describe("StatusCommandHandler", () => {
       },
       {
         taskId: "task-1",
-        promptPreview: "Check the current repository status."
+        taskType: "review",
+        promptPreview: "Check the current repository status.",
+        onCancel: () => {}
       }
     );
 
@@ -116,6 +118,14 @@ describe("StatusCommandHandler", () => {
     });
     expect(interaction.reply).toHaveBeenCalledWith({
       content: expect.stringContaining("当前任务：`task-1`"),
+      ephemeral: true
+    });
+    expect(interaction.reply).toHaveBeenCalledWith({
+      content: expect.stringContaining("当前任务类型：`review`"),
+      ephemeral: true
+    });
+    expect(interaction.reply).toHaveBeenCalledWith({
+      content: expect.stringContaining("可取消任务：`yes`"),
       ephemeral: true
     });
     expect(interaction.reply).toHaveBeenCalledWith({

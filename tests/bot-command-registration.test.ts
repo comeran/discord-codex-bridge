@@ -17,6 +17,8 @@ describe("Discord bot command registration", () => {
       "project",
       "session",
       "run",
+      "review",
+      "cancel",
       "status",
       "skill",
       "mcp"

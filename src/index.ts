@@ -1,8 +1,10 @@
 import { CodexCliAdapter } from "./adapters/codex-cli-adapter.js";
 import { DiscordBot } from "./bot/bot.js";
+import { CancelCommandHandler } from "./bot/cancel-command-handler.js";
 import { DiscordMessageHandler } from "./bot/message-handler.js";
 import { McpCommandHandler } from "./bot/mcp-command-handler.js";
 import { ProjectCommandHandler } from "./bot/project-command-handler.js";
+import { ReviewCommandHandler } from "./bot/review-command-handler.js";
 import { RunCommandHandler } from "./bot/run-command-handler.js";
 import { SandboxCommandHandler } from "./bot/sandbox-command-handler.js";
 import { SessionCommandHandler } from "./bot/session-command-handler.js";
@@ -73,6 +75,13 @@ async function main(): Promise<void> {
     bindingStore,
     orchestrator
   });
+  const reviewCommandHandler = new ReviewCommandHandler({
+    bindingStore,
+    orchestrator
+  });
+  const cancelCommandHandler = new CancelCommandHandler({
+    orchestrator
+  });
   const statusCommandHandler = new StatusCommandHandler({
     bindingStore,
     statusService: channelStatusService
@@ -92,6 +101,8 @@ async function main(): Promise<void> {
       projectCommandHandler,
       sessionCommandHandler,
       runCommandHandler,
+      reviewCommandHandler,
+      cancelCommandHandler,
       statusCommandHandler,
       skillCommandHandler,
       mcpCommandHandler

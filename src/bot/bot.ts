@@ -15,6 +15,8 @@ import { sandboxCommandDefinition } from "./sandbox-command-handler.js";
 import { projectCommandDefinition } from "./project-command-handler.js";
 import { sessionCommandDefinition } from "./session-command-handler.js";
 import { runCommandDefinition } from "./run-command-handler.js";
+import { reviewCommandDefinition } from "./review-command-handler.js";
+import { cancelCommandDefinition } from "./cancel-command-handler.js";
 import { statusCommandDefinition } from "./status-command-handler.js";
 import { skillCommandDefinition } from "./skill-command-handler.js";
 import { mcpCommandDefinition } from "./mcp-command-handler.js";
@@ -29,6 +31,8 @@ export function buildGuildCommandDefinitions(): ApplicationCommandDataResolvable
     projectCommandDefinition,
     sessionCommandDefinition,
     runCommandDefinition,
+    reviewCommandDefinition,
+    cancelCommandDefinition,
     statusCommandDefinition,
     skillCommandDefinition,
     mcpCommandDefinition

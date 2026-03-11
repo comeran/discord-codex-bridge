@@ -99,7 +99,9 @@ export function formatStatusMessage(
     `总待处理任务数：\`${status.pendingCount}\``,
     `排队任务数：\`${status.queuedCount}\``,
     `当前任务：\`${status.activeTaskId ?? "无"}\``,
+    `当前任务类型：\`${status.activeTaskType ?? "无"}\``,
     `当前任务摘要：${status.activePromptPreview ?? "无"}`,
+    `可取消任务：\`${status.hasCancellableTask ? "yes" : "no"}\``,
     `当前 Codex 会话：\`${status.session?.lastCodexSessionId ?? "未记录"}\``,
     `最近任务 ID：\`${status.session?.lastTaskId ?? "未记录"}\``
   ].join("\n");
