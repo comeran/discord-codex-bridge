@@ -5,37 +5,37 @@ import {
 } from "discord.js";
 
 import {
-  formatTaskResultMessages,
-  formatQueuedMessage
+  formatQueuedMessage,
+  formatTaskResultMessages
 } from "../core/message-formatter.js";
 import { TaskOrchestrator } from "../core/task-orchestrator.js";
 import type { BindingStore } from "../store/binding-store.js";
 
-export const runCommandDefinition: ApplicationCommandDataResolvable = {
-  name: "run",
-  description: "Run a Codex task in the project bound to this channel",
+export const reviewCommandDefinition: ApplicationCommandDataResolvable = {
+  name: "review",
+  description: "Run a code review task in the project bound to this channel",
   options: [
     {
       type: ApplicationCommandOptionType.String,
       name: "prompt",
-      description: "Natural-language task for Codex",
-      required: true
+      description: "Optional review instruction for Codex",
+      required: false
     }
   ]
 };
 
-export interface RunCommandHandlerDeps {
+export interface ReviewCommandHandlerDeps {
   bindingStore: BindingStore;
   orchestrator: TaskOrchestrator;
 }
 
-export class RunCommandHandler {
-  public constructor(private readonly deps: RunCommandHandlerDeps) {}
+export class ReviewCommandHandler {
+  public constructor(private readonly deps: ReviewCommandHandlerDeps) {}
 
   public async handle(
     interaction: ChatInputCommandInteraction
   ): Promise<boolean> {
-    if (interaction.commandName !== "run") {
+    if (interaction.commandName !== "review") {
       return false;
     }
 
@@ -56,12 +56,15 @@ export class RunCommandHandler {
       return true;
     }
 
-    const prompt = interaction.options.getString("prompt", true).trim();
+    const prompt =
+      interaction.options.getString("prompt")?.trim() || buildDefaultReviewPrompt();
+
     const submission = this.deps.orchestrator.submit({
       guildId: interaction.guildId ?? "unknown",
       channelId: interaction.channelId,
       userId: interaction.user.id,
       prompt,
+      taskType: "review",
       binding
     });
 
@@ -78,4 +81,12 @@ export class RunCommandHandler {
 
     return true;
   }
+}
+
+export function buildDefaultReviewPrompt(): string {
+  return [
+    "Review the current project and the latest relevant changes.",
+    "Prioritize findings about bugs, risks, regressions, and missing tests.",
+    "Keep the response concise and list findings first before any short summary."
+  ].join("\n");
 }

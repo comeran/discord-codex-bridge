@@ -30,6 +30,30 @@ export function formatFailedMessages(result: TaskExecutionResult): string[] {
   );
 }
 
+export function formatCancelledMessages(
+  result: TaskExecutionResult
+): string[] {
+  const body = result.error?.trim() || "Codex 任务已取消。";
+
+  return chunkDiscordMessage(
+    `任务 \`${result.task.taskId}\` 已取消 (${formatDuration(result.durationMs)})\n项目: \`${result.task.projectPath}\`\n\n${body}`
+  );
+}
+
+export function formatTaskResultMessages(
+  result: TaskExecutionResult
+): string[] {
+  switch (result.status) {
+    case "completed":
+      return formatCompletedMessages(result);
+    case "cancelled":
+      return formatCancelledMessages(result);
+    case "failed":
+    default:
+      return formatFailedMessages(result);
+  }
+}
+
 export function formatHelpMessage(
   bindCommand: string,
   bindingCommand: string,
